@@ -31,9 +31,14 @@ function setUpContract(contractAddress, abi, wallet) {
 async function changeBalance(data) {
     try {
 
-        let wallet = setUpWallet();
+        const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+        const encryptedJsonKey = fs.readFileSync("./.encryptedKey.json", "utf8");
+        let wallet = ethers.Wallet.fromEncryptedJsonSync(encryptedJsonKey, process.env.PRIVATE_KEY_PASSWORD);
+        wallet = wallet.connect(provider);
+        // let wallet = setUpWallet();
 
-        const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
+        // const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
+        const contract = new ethers.Contract(process.env.CONTRACT_ADDRESS, ABI, wallet);
         const tx = await contract.changeBalance(data.from, data.amount);
         const receipt = await tx.wait();
         if (receipt.status) {
@@ -55,8 +60,8 @@ async function createProposal(data) {
         let wallet = setUpWallet();
 
         const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
-        
-        const tx = await contract.createProposal(data.intiator, data._name, data._deadLine, data.desc);
+
+        const tx = await contract.createProposal(data.intiator, data.name, data.deadLine, data.desc);
         const receipt = await tx.wait();
 
         if (receipt.status) {
@@ -81,7 +86,7 @@ async function voteOnProposal(data) {
 
         const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
 
-        const tx = await contract.voteOnProposal(data.intiator, data.proposalId, data.decision, data._tokenId);
+        const tx = await contract.voteOnProposal(data.intiator, data.proposalId, data.decision, data.tokenId);
         const receipt = await tx.wait();
 
         if (receipt.status) {
@@ -104,7 +109,7 @@ async function delegateVotingPower(data) {
 
         const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
 
-        const tx = await contract.delegateVotingPower(data.intiator, data._delegate, data._tokenId, data.proposalId);
+        const tx = await contract.delegateVotingPower(data.intiator, data.delegate, data.tokenId, data.proposalId);
         const receipt = await tx.wait();
 
         if (receipt.status) {
@@ -178,8 +183,8 @@ app.post("/create-proposal", async (req, res) => {
     const data = req.body;
     const signerAddress = verifyMessageWithEthers(JSON.stringify({
         intiator: data.intiator,
-        _name: data.title,
-        _deadLine: data.deadLine,
+        name: data.name,
+        deadLine: data.deadLine,
         desc: data.description
     }), data.signature);
     if (signerAddress.toString()) {
@@ -200,7 +205,7 @@ app.post("/vote-on-proposal", async (req, res) => {
         intiator: data.intiator,
         proposalId: data.proposalId,
         decision: data.decision,
-        _tokenId: data._tokenId
+        tokenId: data.tokenId
     }), data.signature);
 
     if (signerAddress.toString()) {
@@ -219,6 +224,8 @@ app.post("/delegate-vote", async (req, res) => {
     const data = req.body;
     const signerAddress = verifyMessageWithEthers(JSON.stringify({
         intiator: data.intiator,
+        delegate: data.delegate,
+        tokenId: data.tokenId,
         proposalId: data.proposalId
     }), data.signature);
 
@@ -238,8 +245,6 @@ app.post("/execute-proposal", async (req, res) => {
     const data = req.body;
     const signerAddress = verifyMessageWithEthers(JSON.stringify({
         intiator: data.intiator,
-        _delegate : data._delegate,
-        _tokenId: data._tokenId,
         proposalId : data.proposalId
     }), data.signature);
 
