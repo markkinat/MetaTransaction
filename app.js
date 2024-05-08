@@ -1,11 +1,15 @@
-const ethers = require("ethers")
-const fs = require("fs-extra")
-require("dotenv").config();
-const ABI = require("./TestingAbi.json")
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-const { Wallet } = require("ethers");
+
+const { createMarketPlaceListing,
+        performMarketPlaceBid,
+        claimMarketPlaceAuction } = require("./marketPlace/marketPlaceContract");
+
+const { createProposal,
+        voteOnProposal,
+        delegateVotingPower,
+        executeProposal } = require("./dao/daoContract");
 
 const app = express();
 
@@ -15,171 +19,80 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(morgan("common"));
 
 
-function setUpWallet() {
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-    const encryptedJsonKey = fs.readFileSync("./.encryptedKey.json", "utf8");
-    let wallet = ethers.Wallet.fromEncryptedJsonSync(encryptedJsonKey, process.env.PRIVATE_KEY_PASSWORD);
-    wallet = wallet.connect(provider);
-    return wallet;
-}
-
-function setUpContract(contractAddress, abi, wallet) {
-    return new ethers.Contract(contractAddress, abi, wallet);
-}
-
-
-async function changeBalance(data) {
-    try {
-
-        const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-        const encryptedJsonKey = fs.readFileSync("./.encryptedKey.json", "utf8");
-        let wallet = ethers.Wallet.fromEncryptedJsonSync(encryptedJsonKey, process.env.PRIVATE_KEY_PASSWORD);
-        wallet = wallet.connect(provider);
-        // let wallet = setUpWallet();
-
-        // const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
-        const contract = new ethers.Contract(process.env.CONTRACT_ADDRESS, ABI, wallet);
-        const tx = await contract.changeBalance(data.from, data.amount);
-        const receipt = await tx.wait();
-        if (receipt.status) {
-            return { success: true, tx, message: "sent" }
-        } else {
-            return { success: false, tx, message: "failed" }
-        }
-    } catch (error) {
-        console.error(error);
-        return {
-            success: false, tx: {}, message: error?.reason ?? "ERROR_OCCURED"
-        }
-    }
-}
-
-async function createProposal(data) {
-    try {
-
-        let wallet = setUpWallet();
-
-        const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
-
-        const tx = await contract.createProposal(data.intiator, data.name, data.deadLine, data.desc);
-        const receipt = await tx.wait();
-
-        if (receipt.status) {
-            return { success: true, tx, message: "sent" }
-        } else {
-            return { success: false, tx, message: "failed" }
-        }
-
-    } catch (error) {
-        console.error(error);
-        return {
-            success: false, tx: {}, message: error?.reason ?? "ERROR_OCCURED"
-        }
-    }
-}
-
-
-async function voteOnProposal(data) {
-    try {
-
-        let wallet = setUpWallet();
-
-        const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
-
-        const tx = await contract.voteOnProposal(data.intiator, data.proposalId, data.decision, data.tokenId);
-        const receipt = await tx.wait();
-
-        if (receipt.status) {
-            return { success : true, tx, message: "sent" }
-        } else {
-            return { success : false, tx, message: "failed" }
-        }
-    } catch (error) {
-        console.error(error);
-        return {
-            success: false, tx: {}, message: error?.reason ?? "ERROR_OCCURED"
-        }
-    }
-}
-
-async function delegateVotingPower(data) {
-    try {
-
-        let wallet = setUpWallet();
-
-        const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
-
-        const tx = await contract.delegateVotingPower(data.intiator, data.delegate, data.tokenId, data.proposalId);
-        const receipt = await tx.wait();
-
-        if (receipt.status) {
-            return {
-                success: true, tx, message: "sent"
-            }
-        } else {
-            return {
-                success: false, tx, message: "failed"
-            }
-        }
-    } catch (error) {
-        console.error(error);
-        return { success: false, tx: {}, message: error?.reason ?? "ERROR_OCCURED" }
-    }
-}
-
-async function executeProposal(data) {
-    try {
-        
-        let wallet = setUpWallet();
-
-        const contract = setUpContract(process.env.CONTRACT_ADDRESS, ABI, wallet);
-
-        const tx = await contract.executeProposal(data.intiator, data.proposalId);
-        const receipt = await tx.wait();
-
-        if (receipt.status) {
-            return {
-                success: true, tx, message: "sent"
-            }
-        } else {
-            return {
-                success: false, tx, message: 'failed'
-            }
-        }
-    } catch (error) {
-        console.error(error);
-        return {
-            success: false, tx: {}, message: error?.reason ?? "ERROR_OCCURED"
-        }
-    }
-}
-
 function verifyMessageWithEthers(message, signature) {
     const signerAddress = ethers.verifyMessage(message, signature);
     return signerAddress;
 }
 
-
-app.post("/change-balance", async (req, res) => {
+app.post("/marketplace/create-listing", async (req, res) => {
     const data = req.body;
+    const recievedData = { ...data.params };
     const signerAddress = verifyMessageWithEthers(JSON.stringify({
-        from: data.from,
-        amount: data.amount,
+        params: recievedData
     }), data.signature);
 
-    if (signerAddress.toString() === data.from.toString()) {
-        const tx = await changeBalance(data);
+    if (signerAddress.toString() === recievedData.intiator.toString()) {
+        
+        createMarketPlaceListing(recievedData).then(tx => {
+            if (tx.success) {
+                res.status(201).send(tx)
+            } else {
+                res.status(500).send(tx);
+            }
+        }).catch(error => {
+            console.error(error);
+            return {
+                success: false, tx: {}, message: error?.reason ?? "error"
+            }
+        })
+    } else {
+        res.status(400).send({ success: false, message: "couldn't verify signature" });
+    }
+});
+
+app.post("/marketplace/auctionBid", async (req, res) => {
+    const data = req.body;
+    const signerAddress = verifyMessageWithEthers(JSON.stringify({
+        intiator: data.intiator,
+        auctionId: data.auctionId,
+        bidAmount: data.bidAmount
+    }), data.signature);
+
+    if (signerAddress.toString() === data.intiator.toString()) {
+        const tx = await performMarketPlaceBid(data);
         if (tx.success) {
-            res.status(200).send(tx)
+            res.status(201).send(tx);
         } else {
-            res.status(500).send(tx)
+            res.status(500).send(tx);
         }
     } else {
-        res.status(400).send({ success: false, message: "Invalid signature" })
+        res.status(400).send({ success: false, message: "couldn't verify signature" });
     }
 })
 
-app.post("/create-proposal", async (req, res) => {
+app.post("/marketplace/auction-claim", async (req, res) => {
+    const data = req.body;
+
+    const signerAddress = verifyMessageWithEthers(JSON.stringify({
+        intiator: data.intiator,
+        auctionId: data.auctionId
+    }), data.signature);
+
+    if (signerAddress.toString() === data.params.intiator) {
+
+        const tx = await claimMarketPlaceAuction(data);
+        if (tx.success) {
+            res.status(201).send(tx);
+        }
+        else {
+            res.status(500).send(tx)
+        }
+    } else {
+        res.status(400).send({ success: false, message: "couldn't verify signature" });
+    }
+});
+
+app.post("/dao/create-proposal", async (req, res) => {
     const data = req.body;
     const signerAddress = verifyMessageWithEthers(JSON.stringify({
         intiator: data.intiator,
@@ -187,19 +100,34 @@ app.post("/create-proposal", async (req, res) => {
         deadLine: data.deadLine,
         desc: data.description
     }), data.signature);
-    if (signerAddress.toString()) {
-        const tx = await createProposal(data);
-        if (tx.success) {
-            res.status(200).send(tx);
-        } else {
-            res.status(500).send(tx);
-        }
+
+    if (signerAddress.toString() === data.intiator.toString()) {
+        createProposal(data).then(tx => {
+            if (tx.success) {
+                    res.status(201).send(tx)
+            } else {
+                    res.status(400).send({
+                    success: false,
+                    tx: tx, 
+                    message: "Proposal creation failed",
+                    error: tx.error || "An unknown error occurred" 
+                    });
+                }
+        }).catch(error => {
+            console.error(error)
+            res.status(500).send({
+                success: false,
+                tx: null,
+                message: "Internal server error during proposal creation",
+                errorDetails: error.message || "An unknown error occurred" 
+            });
+        })
     } else {
         res.status(400).send({ success: false, message: "couldn't verify signature" });
     }
 });
 
-app.post("/vote-on-proposal", async (req, res) => {
+app.post("/dao/vote-on-proposal", async (req, res) => {
     const data = req.body;
     const signerAddress = verifyMessageWithEthers(JSON.stringify({
         intiator: data.intiator,
@@ -208,7 +136,7 @@ app.post("/vote-on-proposal", async (req, res) => {
         tokenId: data.tokenId
     }), data.signature);
 
-    if (signerAddress.toString()) {
+    if (signerAddress.toString() === data.intiator.toString()) {
         const tx = await voteOnProposal(data);
         if (tx.success) {
             res.status(200).send(tx);
@@ -220,7 +148,7 @@ app.post("/vote-on-proposal", async (req, res) => {
     }
 });
 
-app.post("/delegate-vote", async (req, res) => {
+app.post("/dao/delegate-vote", async (req, res) => {
     const data = req.body;
     const signerAddress = verifyMessageWithEthers(JSON.stringify({
         intiator: data.intiator,
@@ -229,7 +157,7 @@ app.post("/delegate-vote", async (req, res) => {
         proposalId: data.proposalId
     }), data.signature);
 
-    if (signerAddress.toString()) {
+    if (signerAddress.toString() === data.intiator.toString()) {
         const tx = await delegateVotingPower(data);
         if (tx.success) {
             res.status(200).send(tx);
@@ -241,14 +169,14 @@ app.post("/delegate-vote", async (req, res) => {
     }
 });
 
-app.post("/execute-proposal", async (req, res) => {
+app.post("/dao/execute-proposal", async (req, res) => {
     const data = req.body;
     const signerAddress = verifyMessageWithEthers(JSON.stringify({
         intiator: data.intiator,
         proposalId : data.proposalId
     }), data.signature);
 
-    if (signerAddress.toString()) {
+    if (signerAddress.toString() === data.intiator.toString()) {
         const tx = await executeProposal(data);
         if (tx.success) {
             res.status(200).send(tx);
@@ -268,6 +196,4 @@ const server = app;
 const PORT = 5000 || process.env.PORT
 server.listen(5000, async () => {
     console.log("server running on port ", PORT);
-
 });
-
