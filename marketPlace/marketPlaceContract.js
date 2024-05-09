@@ -36,7 +36,7 @@ async function performMarketPlaceBid(data) {
 
         const contract = setUpContract(process.env.MARKET_PLACE_CONTRACT_ADDRESS, MarketPlace_ABI, wallet);
 
-        const tx = await contract.bidInAuction(data.intiator,data.auctionId, data.bidAmount);
+        const tx = await contract.bidInAuction(data.intiator.toString(),data.auctionId, data.bidAmount);
         const receipt = await tx.wait();
 
         if (receipt.status) {
